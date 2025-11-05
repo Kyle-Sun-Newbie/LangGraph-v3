@@ -77,7 +77,7 @@ python data_validate.py
 | **Scheme 5 — rag_llm** | RAG + LLM（检索 TTL 片段 → 拼上下文 → 生成） | **第 2 级** |
 | **Scheme 1 — fewshot_faiss** | few-shot（Top-K 示例；可拷最近邻/LLM 复写） | **第 3 级（实际选用了效果更好的Scheme2）** |
 | **Scheme 2 — fewshot_hnsw** | few-shot + **HNSW/FAISS** 检索加速 | **第 3 级** |
-
+| **Scheme 6 — timeseries_template** | **模板方法的时序数据评测** | **与0 级（首轮）采用同样的预设模板思路** |
 
 ### 6.2 示例结果
 
@@ -89,6 +89,7 @@ python data_validate.py
 | template（全量） | ~0.00 | — | 覆盖面小 |
 | llm（抽样100） | ~0.01 | — | 无上下文/示例 |
 | rag_llm（抽样50） | ~0.34 | ~0.42 | 依赖检索片段质量 |
+| timeseries_template |            1 |              1 | 数据规整，模板效果极高           |
 
 
 
