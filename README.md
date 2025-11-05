@@ -85,7 +85,7 @@ python data_validate.py
 |---|---:|---:|---|
 | fewshot_faiss（全量, 无 LLM） | ~0.150 | ~0.383 | 朴素召回/FAISS，覆盖广，语法稳 | 
 | fewshot_hnsw（全量, 无 LLM） | ~0.152 | ~0.389 | **HNSW** 加速选例 |
-| fewshot_hnsw（抽样100, +LLM） | **~0.880** | ~0.78 | 多文件合并，count 题 Acc≈1.0 |
+| fewshot_hnsw（抽样100, +LLM） | **~0.856** | ~0.78 | 多文件合并，count 题 Acc≈1.0 |
 | template（全量） | ~0.00 | — | 覆盖面小 |
 | llm（抽样100） | ~0.01 | — | 无上下文/示例 |
 | rag_llm（抽样50） | ~0.34 | ~0.42 | 依赖检索片段质量 |
