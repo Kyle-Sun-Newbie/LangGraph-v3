@@ -105,6 +105,7 @@ python data_validate.py
 | 合并 | 560 | 482 | 0.1393 | 0.7804 | 0.8575 | 0.8797 | 0.8900 |  
 
 > 说明：具体数值会随采样与提示词变化而波动；
+> 可以查看app/experiments/train_record.markdown检查更多数据
 ---
 
 ## 七、快速开始
