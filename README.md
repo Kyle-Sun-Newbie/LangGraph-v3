@@ -75,7 +75,7 @@ python data_validate.py
 | **Scheme 3 — template** | 模板/规则直出 | **0 级（首轮）** |
 | **Scheme 4 — llm** | LLM 直出 | **第 1 级** |
 | **Scheme 5 — rag_llm** | RAG + LLM（检索 TTL 片段 → 拼上下文 → 生成） | **第 2 级** |
-| **Scheme 1 — fewshot_rag** | few-shot（Top-K 示例；可拷最近邻/LLM 复写） | **第 3 级（实际选用了效果更好的Scheme2）** |
+| **Scheme 1 — fewshot_faiss** | few-shot（Top-K 示例；可拷最近邻/LLM 复写） | **第 3 级（实际选用了效果更好的Scheme2）** |
 | **Scheme 2 — fewshot_hnsw** | few-shot + **HNSW/FAISS** 检索加速 | **第 3 级** |
 
 
@@ -83,7 +83,7 @@ python data_validate.py
 
 | Scheme | 严格 F1（macro） | 有结果率（nonempty） | 备注 |
 |---|---:|---:|---|
-| fewshot_rag（全量, 无 LLM） | ~0.150 | ~0.383 | 朴素召回/FAISS，覆盖广，语法稳 | 
+| fewshot_faiss（全量, 无 LLM） | ~0.150 | ~0.383 | 朴素召回/FAISS，覆盖广，语法稳 | 
 | fewshot_hnsw（全量, 无 LLM） | ~0.152 | ~0.389 | **HNSW** 加速选例 |
 | fewshot_hnsw（抽样100, +LLM） | **~0.880** | ~0.78 | 多文件合并，count 题 Acc≈1.0 |
 | template（全量） | ~0.00 | — | 覆盖面小 |
