@@ -14,17 +14,10 @@ LLMClient 支持三种后端：
 3) Ollama：如果 LLM_PROVIDER=ollama（或手动设置）
 
 优先级自动检测：DEEPSEEK > OPENAI > OLLAMA
-你也可用环境变量强制指定：LLM_PROVIDER=deepseek|openai|ollama
 """
 
 def _make_http_client():
-    """
-    兼容 httpx 多版本：
-    - 默认禁用系统代理（避免被公司代理/MITM 证书劫持）；
-      如需使用系统代理，设置环境变量：LLM_TRUST_ENV=1
-    - 如果当前 httpx 版本支持 retries 参数，就启用 3 次重试；不支持则忽略。
-    - 如果当前 httpx.Client 支持 proxies 参数，则显式传入 None；不支持则不传。
-    """
+
     trust_env = os.getenv("LLM_TRUST_ENV", "0") == "1"
 
     # 构造 transport，按需带 retries（有的版本支持，有的不支持）
@@ -57,13 +50,12 @@ class LLMClient:
         if forced in {"deepseek", "openai", "ollama"}:
             self.provider = forced
         else:
-            # 自动检测：DEEPSEEK > OPENAI > OLLAMA
             self.provider = "deepseek" if has_ds else ("openai" if has_oa else os.getenv("LLM_PROVIDER", "openai"))
 
         self.model = model or os.getenv("LLM_MODEL", "")
         self.base_url = base_url or os.getenv("LLM_BASE_URL", None)
 
-        self.kind = "none"               # "langchain_deepseek" | "openai_compatible" | "ollama" | "none"
+        self.kind = "none"
         self.langchain_llm = None
         self.client = None
         self.http_client = _make_http_client()

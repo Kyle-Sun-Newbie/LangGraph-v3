@@ -23,7 +23,7 @@ def run_sparql(ttl_path: Path, query: str) -> QueryResult:
 
 # —— 集合提取与归一化 —— #
 
-# 优先 ?result 列（你的数据是按 ?result 变量导出的）
+# 优先 ?result 列
 PREF_COLS = ["result", "room", "x", "s", "subject", "entity", "pt", "node", "name", "label"]
 
 def to_setlike(rows: List[Dict[str, Any]]) -> Tuple[str, Set[str]]:

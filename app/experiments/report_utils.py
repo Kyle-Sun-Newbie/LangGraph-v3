@@ -26,7 +26,6 @@ def _apply_test_data_2_override(rows: List[Dict[str, Any]]) -> List[Dict[str, An
     """
     仅对 test_data_2 的样本：用 pred_rows_preview 与 goldq_rows_preview 是否一致来打分。
     - 将该行视作 count 题：r['mode'] = 'count'
-    - 设置 r['acc'] = 1.0 (一致) / 0.0 (不一致)
     其它数据集不做改动。
     """
     patched = []
