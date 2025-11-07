@@ -4,7 +4,7 @@ from typing import Dict, Any, List, Tuple
 import streamlit as st
 import pandas as pd
 from tools.graph import agent
-from tools.graph import USE_RAG
+from tools.graph import USE_RAG  # 现在是 False（RAG 不在主干）
 
 st.set_page_config(page_title="Building Q&A (LangGraph)", page_icon="🤖", layout="wide")
 st.title("🤖 Building Q&A · RAG & LangGraph")
@@ -43,7 +43,7 @@ def build_frames_from_trace(trace: List[str], hints: Dict[str, Any] | None = Non
     seq = [alias.get(str(x), str(x)) for x in trace if x]
     hints = hints or {}
 
-    # 拓扑类
+    # 拓扑类问题：执行后直接结构化回答
     if hints.get("question_type") == "topology" and "execute_sparql" in seq and "analyze" not in seq:
         if "topology_answer" not in seq:
             seq.insert(seq.index("execute_sparql") + 1, "topology_answer")
@@ -53,7 +53,7 @@ def build_frames_from_trace(trace: List[str], hints: Dict[str, Any] | None = Non
     if time_range and time_range.get("kind") == "point_in_time" and "execute_sparql" in seq and "analyze_point_in_time" not in seq:
         seq.insert(seq.index("execute_sparql") + 1, "analyze_point_in_time")
 
-    # 回退策略动画
+    # 回退策略动画（注意：L2 会出现 rag）
     if retries > 0:
         last_execute_idx = -1
         for i, node in enumerate(seq):
@@ -86,27 +86,24 @@ def build_frames_from_trace(trace: List[str], hints: Dict[str, Any] | None = Non
         frames.append({"nodes": [seq[0]], "edges": []})
     return frames
 
+
 def build_dot(
         active_nodes: List[str],
         active_edges: List[Tuple[str, str]],
         retries: int = 0,
         fallback_strategy: str = "none"
 ) -> str:
-    # 图中出现的所有节点（含回退节点）
+    # 所有可能出现的节点（含回退节点）
     core_nodes = [
-        "intent", "rag", "normalize_time", "generate_sparql", "execute_sparql",
+        "intent", "normalize_time", "generate_sparql", "execute_sparql",
         "route_zero_rows", "analyze", "analyze_point_in_time", "topology_answer", "answer",
-        "fallback_level_1", "fallback_level_2", "fallback_level_3",
+        "rag", "fallback_level_1", "fallback_level_2", "fallback_level_3",
     ]
 
-    # 固定的逻辑连接
+    # 固定的逻辑连接（主干无 RAG）
     all_edges: List[Tuple[str, str, str]] = []
-    if USE_RAG:
-        all_edges += [("intent", "rag", "forward"), ("rag", "normalize_time", "forward")]
-    else:
-        all_edges += [("intent", "normalize_time", "forward")]
-
     all_edges += [
+        ("intent", "normalize_time", "forward"),
         ("normalize_time", "generate_sparql", "forward"),
         ("generate_sparql", "execute_sparql", "forward"),
         ("execute_sparql", "analyze", "forward"),
@@ -119,6 +116,7 @@ def build_dot(
         ("fallback_level_1", "generate_sparql", "forward"),
         ("route_zero_rows", "fallback_level_2", "forward"),
         ("fallback_level_2", "rag", "forward"),
+        ("rag", "generate_sparql", "forward"),
         ("route_zero_rows", "fallback_level_3", "forward"),
         ("fallback_level_3", "generate_sparql", "forward"),
         ("analyze", "answer", "forward"),
@@ -129,20 +127,21 @@ def build_dot(
     active_nodes_set = set(active_nodes or [])
     active_edges_set = set(active_edges or [])
 
-    # 颜色规则：只区分“走过/没走过”
+    # 颜色规则
     COLOR_NODE_ACTIVE_FILL = "#C6F6D5"  # 绿色填充（经过）
-    COLOR_NODE_INACTIVE_BORDER = "#CBD5E0"  # 灰色边框（未经过）
+    COLOR_NODE_INACTIVE_BORDER = "#CBD5E0"  # 灰边
     COLOR_NODE_INACTIVE_FONT = "#4A5568"
 
     COLOR_EDGE_ACTIVE = "#2F855A"   # 绿色连线（经过）
     COLOR_EDGE_INACTIVE = "#CBD5E0" # 灰色连线（未经过）
 
     label_map = {
-        "intent": "意图解析", "rag": "RAG检索", "normalize_time": "时间归一化",
+        "intent": "意图解析", "normalize_time": "时间归一化",
         "generate_sparql": "生成SPARQL", "execute_sparql": "执行SPARQL",
         "route_zero_rows": "0行回退", "analyze": "统计调度器",
         "analyze_point_in_time": "精确时间点分析", "topology_answer": "结构性回答",
         "answer": "最终回答",
+        "rag": "RAG检索",
         "fallback_level_1": "第一级回退\nLLM生成",
         "fallback_level_2": "第二级回退\nRAG增强",
         "fallback_level_3": "第三级回退\nFew-shot (HNSW)",
@@ -151,9 +150,7 @@ def build_dot(
     def node_stmt(n: str) -> str:
         label = label_map.get(n, n).replace('"', "'")
         if n in active_nodes_set:
-            # 经过：绿色底
             return f'"{n}" [shape=box, style=filled, fillcolor="{COLOR_NODE_ACTIVE_FILL}", label="{label}"];'
-        # 未经过：灰色描边
         return f'"{n}" [shape=box, color="{COLOR_NODE_INACTIVE_BORDER}", fontcolor="{COLOR_NODE_INACTIVE_FONT}", label="{label}"];'
 
     def edge_stmt(a: str, b: str) -> str:
@@ -169,6 +166,7 @@ def build_dot(
         lines.append(edge_stmt(a, b))
     lines.append("}")
     return "\n".join(lines)
+
 
 # 侧边栏历史
 st.sidebar.header("🕘 最近提问历史")
@@ -225,7 +223,6 @@ if submitted and q.strip():
     with col2:
         st.subheader("运行状态")
         st.markdown(f"- 问题类型：{(result.get('hints') or {}).get('question_type')}")
-        st.markdown(f"- RAG 分支：{'开启' if USE_RAG else '关闭'}")
         st.markdown(f"- 结果行数：{len(result.get('rows') or [])}")
         st.markdown(f"- 需要统计：{bool(result.get('need_stats'))}")
 
@@ -235,7 +232,7 @@ if submitted and q.strip():
             if fallback_strategy == "level_1":
                 st.info("🔧 第一级回退：LLM生成SPARQL")
             elif fallback_strategy == "level_2":
-                st.warning("🔄 第二级回退：RAG增强生成")
+                st.warning("🔄 第二级回退：RAG增强（包含检索）")
             elif fallback_strategy == "level_3":
                 st.error("📚 第三级回退：Few-shot (HNSW)")
         else:
