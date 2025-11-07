@@ -3,17 +3,18 @@ from typing import TypedDict, List, Dict, Any
 from langgraph.graph import StateGraph, END
 
 from nodes import (
-    rag_agent,
+    hint_agent,        # ← 语义解析（从 rag_agent 中拆出）
+    rag_agent,         # ← 仅在 L2 回退时使用
     sparql_agent,
     sparql_exec,
     analysis_agent,
     answer_agent,
     normalize_time_agent,
 )
-from nodes import fewshot_agent  # ← 新增
+from nodes import fewshot_agent  # L3
 
-USE_RAG = True
-
+# 重要：RAG 不在主干，仅用于 L2 回退
+USE_RAG = False
 
 class State(TypedDict, total=False):
     question: str
@@ -39,18 +40,19 @@ class State(TypedDict, total=False):
 def node_intent(state: State) -> State:
     state.setdefault("trace", []).append("intent")
     try:
-        state["hints"] = rag_agent.get_hints(state["question"])
-        state["need_stats"] = bool(rag_agent.need_stats(state["question"]))
+        state["hints"] = hint_agent.get_hints(state["question"])
+        state["need_stats"] = bool(hint_agent.need_stats(state["question"]))
     except Exception:
         state["hints"] = {}
         state["need_stats"] = False
 
     state["retries"] = 0
-    state["max_retries"] = 3  # ← 允许三级回退
+    state["max_retries"] = 3  # 允许到第三级回退（few-shot）
     return state
 
 
 def node_rag(state: State) -> State:
+    # 仅在 L2 回退时由 route_zero_rows 分支跳转到这里
     state.setdefault("trace", []).append("rag")
     try:
         chunks = rag_agent.search(state["question"])
@@ -61,28 +63,24 @@ def node_rag(state: State) -> State:
 
 
 def node_normalize_time(state: State) -> State:
+    state.setdefault("trace", []).append("normalize_time")
     return normalize_time_agent.node_normalize_time(state)
 
 
 def node_generate_sparql(state: State) -> State:
     state.setdefault("trace", []).append("generate_sparql")
 
-    # 若已有 SPARQL（来自回退），直接前进
-    if state.get("sparql"):
+    if state.get("sparql"):  # 回退已生成
         return state
 
     try:
         h = state.get("hints", {}) or {}
         new_sparql = sparql_agent.generate(
             state["question"],
-            context=state.get("context", ""),
+            context=state.get("context", ""),  # 主干通常为空；L2 回退后会带有 RAG 上下文
             hints=h,
         )
-
-        # 记录历史
-        if "sparql_history" not in state:
-            state["sparql_history"] = []
-        state["sparql_history"].append(("initial", new_sparql))
+        state.setdefault("sparql_history", []).append(("initial", new_sparql))
         state["sparql"] = new_sparql
     except Exception:
         state["sparql"] = ""
@@ -100,7 +98,7 @@ def node_execute_sparql(state: State) -> State:
     state["rows"] = rows
     state["have_rows"] = bool(rows)
 
-    # 拓扑类问题：获取全集（便于结构化回答）
+    # 拓扑类问题：可取全集，便于结构化回答
     hints = state.get("hints", {}) or {}
     if hints.get("question_type") == "topology":
         try:
@@ -124,7 +122,7 @@ def node_route_zero_rows(state: State) -> State:
 
     try:
         if retry_count == 1:
-            # 第一级回退：LLM 生成
+            # L1：纯 LLM（无 RAG）
             state["sparql"] = sparql_agent.llm_based_sparql_generation(
                 state.get("question", ""),
                 context=state.get("context", ""),
@@ -133,11 +131,13 @@ def node_route_zero_rows(state: State) -> State:
             state["fallback_strategy"] = "level_1"
 
         elif retry_count == 2:
-            # 第二级回退：RAG 增强
+            # L2：RAG 增强 + LLM → SPARQL
             try:
+                # 跳 rag 节点取上下文
                 chunks = rag_agent.search(state.get("question", ""))
                 new_context = rag_agent.build_context(chunks)
                 state["context"] = new_context
+
                 state["sparql"] = rag_agent.advanced_text_to_sparql(
                     state.get("question", ""),
                     retrieved_context=new_context,
@@ -145,7 +145,7 @@ def node_route_zero_rows(state: State) -> State:
                 )
                 state["fallback_strategy"] = "level_2"
             except Exception:
-                # RAG 失败，退回到第一级
+                # RAG 失败，退回 L1
                 state["sparql"] = sparql_agent.llm_based_sparql_generation(
                     state.get("question", ""),
                     context=state.get("context", ""),
@@ -154,32 +154,28 @@ def node_route_zero_rows(state: State) -> State:
                 state["fallback_strategy"] = "level_1_fallback"
 
         elif retry_count == 3:
-            # 第三级回退：few-shot RAG
+            # L3：few-shot
             fs = fewshot_agent.fewshot_generate_sparql(state.get("question", ""))
-            # 记录 few-shot 诊断
             state["fewshot_examples"] = fs.get("examples", [])
             state["fewshot_diag"] = fs.get("diag", {})
-
-            # 优先用 LLM few-shot，否则用最近邻拷贝
             chosen = fs.get("sparql_llm") or fs.get("sparql_copied") or ""
             state["sparql"] = chosen
             state["fallback_strategy"] = "level_3"
 
-            # 历史里把两个候选都记上（便于前端查看）
-            if "sparql_history" not in state:
-                state["sparql_history"] = []
+            # 记录候选
+            state.setdefault("sparql_history", [])
             if fs.get("sparql_copied"):
                 state["sparql_history"].append(("fewshot_copy", fs["sparql_copied"]))
             if fs.get("sparql_llm"):
                 state["sparql_history"].append(("fewshot_llm", fs["sparql_llm"]))
 
-        # 非 few-shot 分支：把当前策略的 SPARQL 记历史
+        # 记录当前策略（非 L3 的分支）
         if state.get("fallback_strategy") not in ("level_3", "fewshot"):
-            if "sparql_history" not in state:
-                state["sparql_history"] = []
-            state["sparql_history"].append((state["fallback_strategy"], state["sparql"]))
+            state.setdefault("sparql_history", []).append(
+                (state["fallback_strategy"], state.get("sparql", ""))
+            )
 
-    except Exception as e:
+    except Exception:
         state["sparql"] = "SELECT ?error WHERE { BIND('查询失败' AS ?error) }"
         state["fallback_strategy"] = "error"
 
@@ -255,15 +251,15 @@ def route_after_execute(state: State) -> str:
 
 
 def route_retry_or_end(state: State) -> str:
-    max_retries = int(state.get("max_retries", 3))  # ← 读 state
+    max_retries = int(state.get("max_retries", 3))
     current_retries = int(state.get("retries", 0))
     return "retry" if current_retries < max_retries else "giveup"
 
 
-# =============== 构建工作流 ===============
+# =============== 构建工作流（主干无 RAG） ===============
 workflow = StateGraph(State)
 workflow.add_node("intent", node_intent)
-workflow.add_node("rag", node_rag)
+workflow.add_node("rag", node_rag)  # 只在 L2 回退路径用
 workflow.add_node("normalize_time", node_normalize_time)
 workflow.add_node("generate_sparql", node_generate_sparql)
 workflow.add_node("execute_sparql", node_execute_sparql)
@@ -274,12 +270,8 @@ workflow.add_node("analyze_point_in_time", node_analyze_point_in_time)
 
 workflow.set_entry_point("intent")
 
-if USE_RAG:
-    workflow.add_edge("intent", "rag")
-    workflow.add_edge("rag", "normalize_time")
-else:
-    workflow.add_edge("intent", "normalize_time")
-
+# 主干：意图解析 → 时间归一化 → 生成 SPARQL
+workflow.add_edge("intent", "normalize_time")
 workflow.add_edge("normalize_time", "generate_sparql")
 workflow.add_edge("generate_sparql", "execute_sparql")
 
@@ -294,11 +286,12 @@ workflow.add_conditional_edges(
     },
 )
 
+# 0 行回退：L1 → L2（含 rag） → L3
 workflow.add_conditional_edges(
     "route_zero_rows",
     route_retry_or_end,
     {
-        "retry": "generate_sparql",
+        "retry": "generate_sparql",  # 每次回退后重新生成再执行
         "giveup": "answer",
     },
 )
