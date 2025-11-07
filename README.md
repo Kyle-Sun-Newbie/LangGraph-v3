@@ -16,16 +16,16 @@
 
 | 模块 | 主要职责 |
 |---|---|
-| `app/nodes/rag_agent.py` | 向量检索 **TTL数据**，构造 `context`；必要时把 `context + hints` 喂给 LLM 生成 SPARQL。 |
+| `app/web_app.py` | Streamlit 前端：输入问题、展示 trace、SPARQL 历史与可视化流程。 |
+| `app/graph.py` | **LangGraph 编排与路由**：执行主路 → 判空 → 逐级回退。 |
+| `app/nodes/hint_agent.py` | 语义解析：识别问题类型（topology/timeseries/other）、房间号、指标、是否需要统计、时间线索等；失败时给出中性 hints（不会臆造）。 |
 | `app/nodes/normalize_time_agent.py` | 将“昨天/最近6小时/2025-10-20 14:00”等时间描述语句解析为标准的 UTC 时间窗/时点。 |
 | `app/nodes/sparql_agent.py` | 生成 SPARQL：模板直出（拓扑类）/ LLM 直出 / 携带 `context` 的 RAG+LLM。 |
 | `app/nodes/sparql_exec.py` | 执行 SPARQL，返回 `rows`、错误信息、耗时。 |
 | `app/nodes/analysis_agent.py` | 时序统计（均值/极值/趋势/时点值）与拓扑计数等。 |
 | `app/nodes/answer_agent.py` | 将结果组织为自然语言回答（中英双语），并做行数限制/空结果提示。 |
-| `app/nodes/fewshot_agent.py` | **few-shot（HNSW/FAISS/Naive）示例检索**，支持多训练集 `train_data_*.json`。 |
-| `app/graph.py` | **LangGraph 编排与路由**：执行主路 → 判空 → 逐级回退。 |
-| `app/web_app.py` | Streamlit 前端：输入问题、展示 trace、SPARQL 历史与可视化流程。 |
-
+| `app/nodes/rag_agent.py` | 用于回退 L2：从 topology.ttl 生成语料、建向量索引，检索片段并与 hints 组上下文喂给 LLM 生成 SPARQL。 |
+| `app/nodes/fewshot_agent.py` | 用于回退 L3：**few-shot（HNSW/FAISS/Naive）示例检索**，支持多训练集 `train_data_*.json`。 |
 
 ## 四、回退策略（触发条件：执行 0 行）
 
