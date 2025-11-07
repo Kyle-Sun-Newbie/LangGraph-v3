@@ -4,6 +4,10 @@ import json
 from typing import Dict, Optional, List
 from functools import lru_cache
 
+# ============ 行为开关 ============
+# 严格模式：缺少关键信息/LLM 不可用或异常/拓扑意图未识别 时，不返回兜底查询，交由执行阶段得到 0 行以触发回退
+STRICT_GENERATE = True
+
 # ============ 常量定义 ============
 BRICK_PREFIX = "PREFIX brick: <https://brickschema.org/schema/Brick#>"
 REF_PREFIX = "PREFIX ref:   <https://brickschema.org/schema/Brick/ref#>"
@@ -67,7 +71,9 @@ def _infer_metric_from_text(text: str) -> Optional[str]:
 
 def _clean_sparql_response(sparql: str) -> str:
     """清理LLM返回的SPARQL响应"""
-    sparql = sparql.strip()
+    sparql = (sparql or "").strip()
+    if not sparql:
+        return ""  # 空串直接返回，避免无意义地补 PREFIX
 
     # 移除代码块标记
     for marker in ["```sparql", "```sql", "```"]:
@@ -183,7 +189,8 @@ class SPARQLGenerator:
 
         if room:
             return self.templates.room_points_tsid(room, metric)
-        return self.templates.list_points_any(limit=20)
+        # 严格模式：缺关键约束（房间）不返回兜底查询，交由执行阶段触发回退
+        return "" if STRICT_GENERATE else self.templates.list_points_any(limit=20)
 
     def generate_topology_query(self, hints: Dict) -> str:
         """生成拓扑类查询"""
@@ -191,13 +198,15 @@ class SPARQLGenerator:
         room = hints.get("room")
         metric = hints.get("metric")
 
-        query_map = {
-            "count_rooms": self.templates.count_rooms,
-            "list_rooms": self.templates.list_rooms,
-            "sensor_existence": lambda: self.templates.sensor_existence(room, metric)
-        }
+        if topo_intent == "count_rooms":
+            return self.templates.count_rooms()
+        if topo_intent == "list_rooms":
+            return self.templates.list_rooms()
+        if topo_intent == "sensor_existence":
+            return self.templates.sensor_existence(room, metric)
 
-        return query_map.get(topo_intent, self.templates.list_rooms)()
+        # 未识别的拓扑意图：严格模式下不返回兜底（让路由进入回退）
+        return "" if STRICT_GENERATE else self.templates.list_rooms()
 
     def generate(self, question: str, context: str = "", hints: Dict | None = None) -> str:
         """主生成函数"""
@@ -224,7 +233,8 @@ class LLMSPARQLGenerator:
         """获取LLM实例（带缓存）"""
         if self._llm is None:
             try:
-                from nodes.rag_agent import _get_llm
+                # 兼容你原来的项目结构，如果在同目录可改为 from rag_agent import _get_llm
+                from nodes.rag_agent import _get_llm  # noqa: F401
                 self._llm = _get_llm()
             except ImportError:
                 self._llm = None
@@ -275,7 +285,8 @@ PREFIX bldg:  <urn:demo-building#>
 
         llm = self._get_llm()
         if llm is None:
-            return SPARQLTemplates.list_points_any(limit=50)
+            # 严格模式：LLM 不可用不返回兜底查询
+            return "" if STRICT_GENERATE else SPARQLTemplates.list_points_any(limit=50)
 
         try:
             prompt = self._build_prompt(question, hints)
@@ -283,12 +294,13 @@ PREFIX bldg:  <urn:demo-building#>
             sparql = response.content if hasattr(response, 'content') else str(response)
 
             cleaned_sparql = _clean_sparql_response(sparql)
-            print(f"[SPARQL-LEVEL1] 第一级回退生成查询: {cleaned_sparql}")
+            # print(f"[SPARQL-LEVEL1] 第一级回退生成查询: {cleaned_sparql}")
             return cleaned_sparql
 
         except Exception as e:
             print(f"[SPARQL-LEVEL1] Error: {e}")
-            return SPARQLTemplates.list_points_any(limit=50)
+            # 严格模式：异常时不返回兜底查询
+            return "" if STRICT_GENERATE else SPARQLTemplates.list_points_any(limit=50)
 
 
 # ============ 模块接口函数 ============
@@ -307,5 +319,5 @@ def llm_based_sparql_generation(question: str, context: str = "", hints: Dict | 
     return _llm_generator.generate(question, context, hints)
 
 
-# 保持向后兼容的别名
+# 保持向后兼容的别名（如外部有 from xxx import _clean_sparql_response）
 _clean_sparql_response = _clean_sparql_response
