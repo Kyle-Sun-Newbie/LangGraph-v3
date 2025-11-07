@@ -1,4 +1,4 @@
-# RAG-LangGraph 楼宇问答系统
+# LangGraph 楼宇问答系统
 
 ## 一、项目概述
 
